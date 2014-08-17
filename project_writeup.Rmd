@@ -1,0 +1,147 @@
+---
+title: 'Practical Machine Learning - Prediction Assignment'
+author: "C. Ribeiro"
+date: "10 Aug 2014"
+output: html_document
+---
+
+## Summary
+
+Six male participants aged between 20-28 years, were asked to perform one set of 10 repetitions
+of the Unilateral Dumbbell Biceps Curl in five different ways [Velloso, E. _et al._, 2013].
+Correctly according to a specification (Class **A**) and with a set of common mistakes: throwing
+the elbows to the front (Class **B**), lifting the dumbbell only halfway (Class **C**), lowering
+the dumbbell only halfway (Class **D**) and throwing the hips to the front (Class **E**). The goal
+of this project is to use data from wearable sensors mounted in the user's glove, armband, lumbar
+belt and dumbbell in order to build a machine learning algorithm to predict the manner in which
+they did exercise (outcome: **_classe_**) and therefore access the quality of the exercise.  
+
+The data for this project and the original paper describing the experiment are available
+[here](http://groupware.les.inf.puc-rio.br/har).
+
+
+## Data Loading and Partition
+
+The original training data was partitioned into a training set and a validation set
+in order to estimate the out-of-sample error.
+
+```{r dataPartition, echo=TRUE, tidy=TRUE}
+library(caret, quietly = TRUE)
+set.seed(1234)
+
+pml_training <- read.csv("pml-training.csv", na.strings=c("NA", "#DIV/0!"))
+dim(pml_training)
+inTrain <- createDataPartition(y=pml_training$classe, p=0.7, list=FALSE)
+training <- pml_training[inTrain,]
+validation <- pml_training[-inTrain,]
+dim(training)
+``` 
+
+## Preprocessing
+
+For the purpose of this project, the variables `X`, `user_name`,
+`raw_timestamp_part_1`, `raw_timestamp_part_2`, `cvtd_timestamp`, `new_window`
+and `num_window` are not useful. They were thus removed from the training set.
+Some columns are predominantly constituted of NA's. Since they could badly affect
+the prediction, this model includes only complete columns.
+_Near-zero-variance_ predictors and highly correlated predictors were also identified
+and eliminated prior to modeling.
+
+```{r cleanVars, echo=TRUE, tidy=TRUE}
+library(corrplot)
+library(dplyr, quietly = TRUE, warn.conflicts = FALSE)
+# Select all columns except those from X to num_window (inclusive)
+training <- select(training, -(X:num_window))
+dim(training)
+
+# Select only complete columns
+training <- training[ ,apply(training, 2, function(x) sum(is.na(x)) == 0)]
+# Identify and eliminate near-zero-variance predictors.
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+# No near-zero-variance predictors were found after selecting complete columns.
+summary(nzv)
+dim(training)
+```
+
+The **_correlation plot_** below shows that some predictors are highly correlated.
+
+```{r correlationPlot, echo=TRUE, tidy=TRUE, fig.cap="Correlation Plot"}
+trainCor <- cor(select(training,-classe))
+corrplot(trainCor, method="color", tl.pos="n")
+# Identify and eliminate highly correlated predictors
+trainHighlyCor <- findCorrelation(trainCor, cutoff = 0.90)
+training <- training[,-trainHighlyCor]
+dim(training)
+```
+
+## Random Forests
+
+The Random Forest algorithm was chosen due to its excellent accuracy and suitability
+for large numbers of predictors. The classifier was tested with 10-fold cross-validation.
+
+```{r RandomForest, echo=TRUE, tidy=TRUE, fig.width=8, fig.height=8}
+set.seed(1379)
+
+modFit <- train(classe ~ ., data=training, method="rf",
+                trControl=trainControl(method="cv", number=10))
+modFit$finalModel
+# Plotting predictor importance
+plot(varImp(modFit))
+```
+
+The two most important predictors are `yaw_belt` and `pitch_forearm`.
+
+## Model Evaluation
+
+```{r modelEvaluation, echo=TRUE, tidy=TRUE}
+pred <- predict(modFit, newdata=validation)
+cm <- confusionMatrix(pred, validation$classe)
+cm
+```
+
+The out-of-sample error using the validation set is 1 - _Accuracy_ = `r 1-cm$overall[1]`
+or **`r (1-cm$overall[1]) * 100` %**
+
+```{r plotError, echo=TRUE, tidy=TRUE}
+validation$predRight <- pred == validation$classe
+ggplot(data=validation[,-ncol(validation)], aes(x=yaw_belt, y=pitch_forearm)) +
+    geom_point(aes(color=classe), alpha=I(1/40)) +
+    labs(title="Validation Dataset")
+ggplot(data=validation, aes(x=yaw_belt, y=pitch_forearm)) +
+    geom_point(aes(color=predRight), alpha=I(1/40)) +
+    labs(title="Validation Predictions")
+```
+
+The plot above shows correct (blue-green) and incorrect predictions (red) on the validation set.
+
+## Test Set Prediction
+
+```{r testPrediction, echo=TRUE, tidy=TRUE}
+pml_testing <- read.csv("pml-testing.csv", na.strings=c("NA", "#DIV/0!"))
+test_pred <- predict(modFit, newdata=pml_testing)
+
+test_pred
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(test_pred)
+```
+
+## Conclusion
+
+The final model based on the Random Forests algorithm is highly accurate in
+predicting the quality of the exercise (_classe_). All of the 20 test cases available
+in the test data used for submission were correctly predicted.
+
+## References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H.
+Qualitative Activity Recognition of Weight Lifting Exercises.
+Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13).
+Stuttgart, Germany: ACM SIGCHI, 2013.
