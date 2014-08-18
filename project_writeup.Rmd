@@ -22,8 +22,8 @@ The data for this project and the original paper describing the experiment are a
 
 ## Data Loading and Partition
 
-The original training data was partitioned into a training set and a validation set
-in order to estimate the out-of-sample error.
+In order to estimate the out-of-sample error, the original training data was partitioned
+into a training set and a validation set.
 
 ```{r dataPartition, echo=TRUE, tidy=TRUE}
 library(caret, quietly = TRUE)
@@ -77,21 +77,29 @@ dim(training)
 ## Random Forests
 
 The Random Forest algorithm was chosen due to its excellent accuracy and suitability
-for large numbers of predictors. The classifier was tested with 10-fold cross-validation.
+for large numbers of predictors. The classifier was tested with **_10-fold cross-validation_**.
 
-```{r RandomForest, echo=TRUE, tidy=TRUE, fig.width=8, fig.height=8}
+```{r RandomForest, echo=TRUE, tidy=TRUE}
 set.seed(1379)
 
 modFit <- train(classe ~ ., data=training, method="rf",
                 trControl=trainControl(method="cv", number=10))
 modFit$finalModel
+```
+
+```{r accuracyPlot, echo=TRUE, tidy=TRUE, fig.cap="Model Accuracy"}
+# Plotting model accuracy
+plot(modFit, log = "y", lwd = 2, main = "Model Accuracy")
+```
+
+```{r importancePlot, echo=TRUE, tidy=TRUE, fig.width=8, fig.height=8, fig.cap="Predictor Importance"}
 # Plotting predictor importance
 plot(varImp(modFit))
 ```
 
 The two most important predictors are `yaw_belt` and `pitch_forearm`.
 
-## Model Evaluation
+## Model Validation
 
 ```{r modelEvaluation, echo=TRUE, tidy=TRUE}
 pred <- predict(modFit, newdata=validation)
@@ -99,20 +107,28 @@ cm <- confusionMatrix(pred, validation$classe)
 cm
 ```
 
-The out-of-sample error using the validation set is 1 - _Accuracy_ = `r 1-cm$overall[1]`
-or **`r (1-cm$overall[1]) * 100` %**
+The expected **_out-of-sample error_** using the validation set is
+1 - (prediction _Accuracy_) = `r 1-cm$overall[1]` or **`r (1-cm$overall[1]) * 100` %**
 
 ```{r plotError, echo=TRUE, tidy=TRUE}
-validation$predRight <- pred == validation$classe
-ggplot(data=validation[,-ncol(validation)], aes(x=yaw_belt, y=pitch_forearm)) +
-    geom_point(aes(color=classe), alpha=I(1/40)) +
-    labs(title="Validation Dataset")
-ggplot(data=validation, aes(x=yaw_belt, y=pitch_forearm)) +
-    geom_point(aes(color=predRight), alpha=I(1/40)) +
-    labs(title="Validation Predictions")
+validation$Predictions <- pred == validation$classe
+# Classes separeted by the two most important predictors
+qplot(data=validation[,-ncol(validation)], x=yaw_belt, y=pitch_forearm,
+    colour=classe, main="Validation Dataset")
+
+## Correct/Incorrect classe predictions separeted by the two most important predictors
+with(validation,{
+     plot(yaw_belt, pitch_forearm, type="n", main="Validation Predictions")
+     points(yaw_belt[validation$Predictions], pitch_forearm[validation$Predictions],
+          col=rgb(0,0,255,255*0.30,maxColorValue=255), pch=19)
+     points(yaw_belt[!validation$Predictions], pitch_forearm[!validation$Predictions], col="red", pch=19)
+     legend(100,70,c("Correct", "Incorrect"), pch=19, col=c("blue","red"))
+     })
 ```
 
-The plot above shows correct (blue-green) and incorrect predictions (red) on the validation set.
+The plot above shows correct (blue) and incorrect (red) predictions on the validation set.
+The blue points have some transparency in order to emphasize the location of the
+incorrect predictions.
 
 ## Test Set Prediction
 
@@ -136,7 +152,7 @@ pml_write_files(test_pred)
 ## Conclusion
 
 The final model based on the Random Forests algorithm is highly accurate in
-predicting the quality of the exercise (_classe_). All of the 20 test cases available
+predicting the quality of the activity (_classe_). All of the 20 test cases available
 in the test data used for submission were correctly predicted.
 
 ## References
